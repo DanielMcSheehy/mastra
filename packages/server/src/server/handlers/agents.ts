@@ -7,7 +7,12 @@ import type {
   SendAgentSignalOptions,
   SendAgentSignalResult,
 } from '@mastra/core/agent';
-import { AGENT_STREAM_TOPIC, DurableStepIds } from '@mastra/core/agent/durable';
+import {
+  AGENT_STREAM_TOPIC,
+  DurableStepIds,
+  executionLeaseKey,
+  resolveLeaseProvider,
+} from '@mastra/core/agent/durable';
 import type { AIV5Type } from '@mastra/core/agent/message-list';
 import type { VersionOverrides } from '@mastra/core/di';
 import { mergeVersionOverrides, MASTRA_VERSIONS_KEY } from '@mastra/core/di';
@@ -195,26 +200,68 @@ function getDurableLoopWorkflowName(agent: DurableAgentLike): string {
 /**
  * Statuses in which a durable run can still publish stream events: an execution
  * is driving it now (here or in another process), or a resume will pick it up.
- * Every other status — and a missing snapshot — means the run is over.
  */
 const RUN_TERMINAL_STATUSES = new Set(['success', 'failed', 'tripwire', 'canceled', 'bailed', 'skipped']);
 
 /**
- * Whether a durable run has settled, per its persisted snapshot.
+ * Whether a pubsub lease, rather than a storage record, holds the run. A process
+ * whose workflows store cannot fence runs claims through the lease instead, and
+ * its runs then have no ownership record to read.
+ */
+async function hasDurableRunLease(mastra: any, durableAgent: DurableAgentLike, runId: string): Promise<boolean> {
+  try {
+    const leaseProvider = resolveLeaseProvider(durableAgent.pubsub ?? mastra.pubsub);
+    const owner = await leaseProvider.getLeaseOwner(executionLeaseKey(durableAgent.id, runId));
+    return owner !== undefined;
+  } catch {
+    // An unreadable lease may still be held: never read that as "over".
+    return true;
+  }
+}
+
+/**
+ * Whether a durable run has settled, i.e. nothing will publish for it again.
  *
- * Returns `false` ("still publishing") whenever storage cannot answer — no
- * storage, no snapshot read, an unparseable snapshot — so callers only ever cut
- * a stream short on a positive "this run is over" reading.
+ * Neither signal is enough on its own:
+ * - Ownership: every execution claims the run before its id reaches a caller
+ *   (`stream()`, `generate()`, `resume()`, `recover()`), and renews the claim
+ *   while it lives. A live claim means the run is (still, or again) being
+ *   driven even when its snapshot row does not exist yet.
+ * - The saved snapshot row: durable runs delete their row when they finish
+ *   (#22209), the same state a run that never started is in. Once ownership is
+ *   gone, a non-terminal row still means a resume or recovery can pick the run up.
+ *
+ * Returns `false` ("still publishing") whenever storage cannot answer or the run
+ * may still be driven, so callers only ever cut a stream short on a positive
+ * "this run is over" reading.
  */
 async function hasDurableRunSettled(mastra: any, durableAgent: DurableAgentLike, runId: string): Promise<boolean> {
   const workflowsStore = await mastra.getStorage()?.getStore('workflows');
-  if (!workflowsStore?.getWorkflowRunById) return false;
+  if (!workflowsStore?.getWorkflowRunById || typeof workflowsStore.getRunOwnership !== 'function') return false;
+
+  // Ownership lives in storage only when the store can fence runs. Stores that
+  // cannot (and stores built against an older contract) raise instead of
+  // answering, so keep the stream open as before.
+  let supportsRunFencing = false;
+  try {
+    supportsRunFencing = (await workflowsStore.supportsRunFencing?.()) === true;
+  } catch {
+    return false;
+  }
+  if (!supportsRunFencing) return false;
+
+  // A released or expired record is kept, so `null` means "never claimed here"
+  // and `live: false` means "claimed, then released or lapsed".
+  const ownership = await workflowsStore.getRunOwnership({ runId });
+  if (ownership?.live) return false;
+  if (!ownership && (await hasDurableRunLease(mastra, durableAgent, runId))) return false;
 
   const workflowRun = await workflowsStore.getWorkflowRunById({
     workflowName: getDurableLoopWorkflowName(durableAgent),
     runId,
   });
-  // No snapshot for this run: it never existed, so nothing will ever publish.
+  // No saved row: the run never started, or finished and deleted its row in
+  // terminal cleanup. Either way nothing publishes for it again.
   if (!workflowRun) return true;
 
   const rawSnapshot: unknown = workflowRun.snapshot;

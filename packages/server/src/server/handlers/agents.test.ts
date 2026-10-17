@@ -1,5 +1,11 @@
 import { Agent } from '@mastra/core/agent';
-import { AGENT_STREAM_TOPIC, AgentStreamEventTypes, createDurableAgent } from '@mastra/core/agent/durable';
+import {
+  AGENT_STREAM_TOPIC,
+  AgentStreamEventTypes,
+  createDurableAgent,
+  executionLeaseKey,
+  resolveLeaseProvider,
+} from '@mastra/core/agent/durable';
 import type { DurableAgent } from '@mastra/core/agent/durable';
 import { ErrorCategory, ErrorDomain, MastraError } from '@mastra/core/error';
 import { EventEmitterPubSub } from '@mastra/core/events';
@@ -2537,6 +2543,104 @@ describe('Agent Routes Authorization', () => {
 
       await reader.cancel();
       await firstRead.catch(() => {});
+    });
+
+    /** A live execution claimed the run; it renews the lease while it works. */
+    const claimRun = async (runId: string, ownerId = 'worker-1') => {
+      const workflows = (await storage.getStore('workflows'))!;
+      const claim = await workflows.claimRunOwnership({ runId, ownerId, leaseMs: 30_000 });
+      return { workflows, fence: { runId, ownerId, generation: claim.record!.generation } };
+    };
+
+    /** A released claim keeps its record but no longer holds a live lease. */
+    const releaseRun = async (runId: string) => {
+      const { workflows, fence } = await claimRun(runId);
+      await workflows.releaseRunOwnership(fence);
+    };
+
+    const expectOpen = async (stream: ReadableStream<any>) => {
+      const reader = stream.getReader();
+      const firstRead = reader.read();
+      const outcome = await Promise.race([
+        firstRead.then(() => 'ended' as const),
+        new Promise<'open'>(resolve => setTimeout(() => resolve('open'), 2500)),
+      ]);
+      await reader.cancel();
+      await firstRead.catch(() => {});
+      expect(outcome).toBe('open');
+    };
+
+    it('keeps observing a run whose execution still owns it, before its row exists', async () => {
+      const runId = 'observe-live-ownership-run';
+      // The execution claims the run before handing its id back to the caller,
+      // so `/stream` can return an id that `/observe` sees before `createRun`
+      // has written the pending snapshot.
+      await claimRun(runId);
+
+      await expectOpen(await observe(runId));
+    });
+
+    it('keeps observing a released run whose snapshot says it is still running', async () => {
+      const runId = 'observe-released-running-run';
+      await persistRun(runId, 'running');
+      await releaseRun(runId);
+
+      // Released ownership means this process stopped driving the run, not that
+      // the run is over: a resume or recovery in another process picks it up.
+      await expectOpen(await observe(runId));
+    });
+
+    it('keeps observing a suspended run so it can be resumed', async () => {
+      const runId = 'observe-suspended-run';
+      await persistRun(runId, 'suspended');
+      await releaseRun(runId);
+
+      await expectOpen(await observe(runId));
+    });
+
+    it('ends the stream for a released run whose snapshot is terminal', async () => {
+      const runId = 'observe-released-finished-run';
+      await persistRun(runId, 'success');
+      await releaseRun(runId);
+
+      expect(await drain(await observe(runId))).toEqual([]);
+    });
+
+    it('ends the stream for a released run that no longer has a snapshot row', async () => {
+      const runId = 'observe-released-missing-row-run';
+      // Finished runs delete their row (#22209), so a missing row plus a dead
+      // claim means nothing will publish here again.
+      await releaseRun(runId);
+
+      expect(await drain(await observe(runId))).toEqual([]);
+    });
+
+    it('keeps observing a run held by a pubsub lease when storage has no ownership record', async () => {
+      const runId = 'observe-leased-run';
+      // Stores that cannot fence runs claim through the pubsub lease instead,
+      // leaving no ownership record for the route to read.
+      await resolveLeaseProvider(mockDurableAgent.pubsub).acquireLease(
+        executionLeaseKey(mockDurableAgent.id, runId),
+        'worker-1',
+        30_000,
+      );
+
+      await expectOpen(await observe(runId));
+    });
+
+    it('keeps observing when the store cannot fence runs, whatever the snapshot says', async () => {
+      const runId = 'observe-unfenced-store-run';
+      await persistRun(runId, 'success');
+      const workflows = (await storage.getStore('workflows'))!;
+      const supportsRunFencing = vi.spyOn(workflows, 'supportsRunFencing').mockResolvedValue(false);
+
+      try {
+        // Without fencing there is no liveness signal to trust, so the route
+        // must not guess that the run is over.
+        await expectOpen(await observe(runId));
+      } finally {
+        supportsRunFencing.mockRestore();
+      }
     });
   });
 

@@ -4810,7 +4810,16 @@ export class DurableAgent<
     let subscribed = true;
 
     const deliver = (event: AgentStreamEvent) => {
-      if (subscribed && event.type !== AgentStreamEventTypes.OWNERSHIP_CLAIMED) onEvent(event);
+      if (!subscribed || event.type === AgentStreamEventTypes.OWNERSHIP_CLAIMED) return;
+      // Sequencing fields exist for subscribers of this topic, not for clients:
+      // the observe route forwards events verbatim, so keep its payload exactly
+      // what pre-#27352 clients already receive.
+      if (event.indexMode !== undefined || event.streamSeq !== undefined) {
+        const { indexMode: _mode, streamSeq: _seq, ...rest } = event;
+        onEvent(rest as AgentStreamEvent);
+        return;
+      }
+      onEvent(event);
     };
     // Acks every delivery, dropped ones included, so a durable backend doesn't
     // keep them pending.
