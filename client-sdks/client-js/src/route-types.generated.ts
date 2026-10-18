@@ -3722,6 +3722,8 @@ type Shared_Type_67 = {
   traceQueryContextIds: boolean;
   /** `timeToFirstChunkMs` in trace and span query results, and predicates on it in trace, thread and span queries */
   traceQueryTimeToFirstChunk: boolean;
+  /** Sorting trace and span queries by `timeToFirstChunkMs` */
+  traceQueryTimeToFirstChunkSort: boolean;
   /** Trace query field discovery (POST /observability/traces/query/fields and /values) */
   traceQueryDiscovery: boolean;
   /** Trusted tenant scoping of trace and thread queries */
@@ -10490,7 +10492,7 @@ export type PostObservabilityTracesQuery_Body = {
     | undefined;
   orderBy?:
     | {
-        field: 'startedAt' | 'endedAt';
+        field: 'startedAt' | 'endedAt' | 'timeToFirstChunkMs';
         direction: 'asc' | 'desc';
       }[]
     | undefined;
@@ -10731,7 +10733,7 @@ export type PostObservabilitySpansQuery_Body = {
   };
   where?: InputShared_Auxiliary_230 | undefined;
   orderBy?: {
-    field: 'startedAt' | 'endedAt';
+    field: 'startedAt' | 'endedAt' | 'timeToFirstChunkMs';
     direction: 'asc' | 'desc';
   }[];
   page?: {

@@ -21,6 +21,7 @@ const NO_OBSERVABILITY_CAPABILITIES = {
   traceQueryRootDuration: false,
   traceQueryContextIds: false,
   traceQueryTimeToFirstChunk: false,
+  traceQueryTimeToFirstChunkSort: false,
   traceQueryDiscovery: false,
   traceQueryTenantScope: false,
   traceAggregate: false,
@@ -667,6 +668,29 @@ describe('System Handlers', () => {
           traceQueryTimeToFirstChunk: true,
         });
         expect(await capabilitiesFor(new NoQueryStore())).toEqual(NO_OBSERVABILITY_CAPABILITIES);
+      });
+
+      it('reports the time to first chunk sort only when the store also serves a trace or span query', async () => {
+        class SpanQueryStore extends BaseObservabilityStore {
+          getFeatures() {
+            return ['span-query', 'trace-query-time-to-first-chunk-sort'] as const;
+          }
+        }
+        class NoQueryStore extends BaseObservabilityStore {
+          getFeatures() {
+            return ['thread-query', 'trace-query-time-to-first-chunk-sort'] as const;
+          }
+        }
+
+        expect(await capabilitiesFor(new SpanQueryStore())).toEqual({
+          ...NO_OBSERVABILITY_CAPABILITIES,
+          spanQuery: true,
+          traceQueryTimeToFirstChunkSort: true,
+        });
+        expect(await capabilitiesFor(new NoQueryStore())).toEqual({
+          ...NO_OBSERVABILITY_CAPABILITIES,
+          threadQuery: true,
+        });
       });
 
       it('treats a declared feature list as final even when methods are overridden', async () => {

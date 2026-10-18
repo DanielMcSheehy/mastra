@@ -46,6 +46,7 @@ export const observabilityStorageCapabilitiesSchema = z.object({
     .describe(
       '`timeToFirstChunkMs` in trace and span query results, and predicates on it in trace, thread and span queries',
     ),
+  traceQueryTimeToFirstChunkSort: z.boolean().describe('Sorting trace and span queries by `timeToFirstChunkMs`'),
   traceQueryDiscovery: z
     .boolean()
     .describe('Trace query field discovery (POST /observability/traces/query/fields and /values)'),

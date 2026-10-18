@@ -49,6 +49,7 @@ const OBSERVABILITY_TRACE_QUERY_CONTEXT_IDS_STORAGE_FEATURE = 'trace-query-conte
 const TRACE_QUERY_CONTEXT_ID_FIELDS = new Set(['runId', 'sessionId', 'userId', 'organizationId']);
 const OBSERVABILITY_TRACE_QUERY_TIME_TO_FIRST_CHUNK_STORAGE_FEATURE = 'trace-query-time-to-first-chunk';
 const TRACE_QUERY_TIME_TO_FIRST_CHUNK_FIELDS = new Set(['timeToFirstChunkMs']);
+const OBSERVABILITY_TRACE_QUERY_TIME_TO_FIRST_CHUNK_SORT_STORAGE_FEATURE = 'trace-query-time-to-first-chunk-sort';
 const OBSERVABILITY_TRACE_QUERY_DISCOVERY_STORAGE_FEATURE = 'trace-query-discovery';
 const OBSERVABILITY_THREAD_QUERY_STORAGE_FEATURE = 'thread-query';
 const OBSERVABILITY_TRACE_QUERY_TENANT_SCOPE_STORAGE_FEATURE = 'trace-query-tenant-scope';
@@ -270,6 +271,30 @@ export function assertObservabilityTraceQueryTimeToFirstChunkSupported(
   });
 }
 
+export function supportsObservabilityTraceQueryTimeToFirstChunkSort(observabilityStore: ObservabilityStorage) {
+  return (
+    getFeatures(observabilityStore)?.includes(OBSERVABILITY_TRACE_QUERY_TIME_TO_FIRST_CHUNK_SORT_STORAGE_FEATURE) ===
+    true
+  );
+}
+
+/** Covers the sort of trace and span queries. */
+export function assertObservabilityTraceQueryTimeToFirstChunkSortSupported(
+  observabilityStore: ObservabilityStorage,
+  orderBy: { field: string },
+) {
+  if (
+    !TRACE_QUERY_TIME_TO_FIRST_CHUNK_FIELDS.has(orderBy.field) ||
+    supportsObservabilityTraceQueryTimeToFirstChunkSort(observabilityStore)
+  ) {
+    return;
+  }
+
+  throw new HTTPException(501, {
+    message: 'Sorting by time to first chunk is not supported by the configured observability store',
+  });
+}
+
 export function assertObservabilityTraceQueryDiscoverySupported(observabilityStore: ObservabilityStorage) {
   if (getFeatures(observabilityStore)?.includes(OBSERVABILITY_TRACE_QUERY_DISCOVERY_STORAGE_FEATURE)) return;
 
@@ -347,6 +372,7 @@ export type ObservabilityStorageCapabilities = {
   traceQueryRootDuration: boolean;
   traceQueryContextIds: boolean;
   traceQueryTimeToFirstChunk: boolean;
+  traceQueryTimeToFirstChunkSort: boolean;
   traceQueryDiscovery: boolean;
   traceQueryTenantScope: boolean;
   traceAggregate: boolean;
@@ -373,6 +399,7 @@ export const NO_OBSERVABILITY_STORAGE_CAPABILITIES: ObservabilityStorageCapabili
   traceQueryRootDuration: false,
   traceQueryContextIds: false,
   traceQueryTimeToFirstChunk: false,
+  traceQueryTimeToFirstChunkSort: false,
   traceQueryDiscovery: false,
   traceQueryTenantScope: false,
   traceAggregate: false,
@@ -451,6 +478,8 @@ export function getObservabilityStorageCapabilities(
     traceQueryTimeToFirstChunk:
       (traceQuery || threadQuery || spanQuery) &&
       declares(OBSERVABILITY_TRACE_QUERY_TIME_TO_FIRST_CHUNK_STORAGE_FEATURE),
+    traceQueryTimeToFirstChunkSort:
+      (traceQuery || spanQuery) && declares(OBSERVABILITY_TRACE_QUERY_TIME_TO_FIRST_CHUNK_SORT_STORAGE_FEATURE),
     traceQueryDiscovery:
       newApiCore && supportsTraceQueryDiscoveryCore() && declares(OBSERVABILITY_TRACE_QUERY_DISCOVERY_STORAGE_FEATURE),
     traceQueryTenantScope:
