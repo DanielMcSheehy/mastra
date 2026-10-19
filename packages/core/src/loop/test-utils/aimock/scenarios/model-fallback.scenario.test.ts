@@ -2,11 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai-v5';
 import { it, expect } from 'vitest';
 import type { LLMock } from '@copilotkit/aimock';
 import { MockMemory } from '../../../../memory/mock';
-import {
-  runLoopScenario,
-  useLoopScenarioAimock,
-  describeForAllEngines,
-} from '../aimock-scenario';
+import { runLoopScenario, useLoopScenarioAimock, describeForAllEngines } from '../aimock-scenario';
 
 /**
  * Model-list fallback across engines (moved from durable-agent-model-fallback,
@@ -189,33 +185,30 @@ describeForAllEngines('AIMock loop scenario: model fallback list', engine => {
   // Completions body is journaled verbatim, so sampling settings are visible there.
   // Real OpenAI model ids: Mastra strips temperature/topP for ids its capability
   // registry does not list as temperature-capable (stream/aisdk/v5/execute.ts).
-  it(
-    'sends each entry its own temperature after failover without leaking the primary settings',
-    async () => {
-      const { output, requests } = await runLoopScenario({
-        engine,
-        errorProcessors: [],
-        llm: getMock(),
-        prompt: 'hi',
-        model: modelList(
-          getMock(),
-          [
-            { id: 'gpt-4o-mini', maxRetries: 0, modelSettings: { temperature: 0.1, topP: 0.5 } },
-            { id: 'gpt-4o', maxRetries: 0, modelSettings: { temperature: 0.9 } },
-          ],
-          'chat',
-        ),
-        fixtures: llm => {
-          llm.on({ endpoint: 'chat', model: 'gpt-4o-mini' }, FAILED);
-          llm.on({ endpoint: 'chat', model: 'gpt-4o' }, { content: 'Fallback response' });
-        },
-      });
+  it('sends each entry its own temperature after failover without leaking the primary settings', async () => {
+    const { output, requests } = await runLoopScenario({
+      engine,
+      errorProcessors: [],
+      llm: getMock(),
+      prompt: 'hi',
+      model: modelList(
+        getMock(),
+        [
+          { id: 'gpt-4o-mini', maxRetries: 0, modelSettings: { temperature: 0.1, topP: 0.5 } },
+          { id: 'gpt-4o', maxRetries: 0, modelSettings: { temperature: 0.9 } },
+        ],
+        'chat',
+      ),
+      fixtures: llm => {
+        llm.on({ endpoint: 'chat', model: 'gpt-4o-mini' }, FAILED);
+        llm.on({ endpoint: 'chat', model: 'gpt-4o' }, { content: 'Fallback response' });
+      },
+    });
 
-      expect(await output.text).toBe('Fallback response');
-      const [primary, fallback] = requests as Array<{ body: Record<string, unknown> }>;
-      expect(primary!.body).toMatchObject({ model: 'gpt-4o-mini', temperature: 0.1, top_p: 0.5 });
-      expect(fallback!.body).toMatchObject({ model: 'gpt-4o', temperature: 0.9 });
-      expect(fallback!.body).not.toHaveProperty('top_p');
-    },
-  );
+    expect(await output.text).toBe('Fallback response');
+    const [primary, fallback] = requests as Array<{ body: Record<string, unknown> }>;
+    expect(primary!.body).toMatchObject({ model: 'gpt-4o-mini', temperature: 0.1, top_p: 0.5 });
+    expect(fallback!.body).toMatchObject({ model: 'gpt-4o', temperature: 0.9 });
+    expect(fallback!.body).not.toHaveProperty('top_p');
+  });
 });
