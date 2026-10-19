@@ -75,10 +75,7 @@ describeForAllEngines(
       expect(resultSteps![0].text).toBe('Test response.');
     });
 
-    // Durable and evented hand onFinish raw tool-result payloads instead of chunks (#27428).
-    const itFailsOnDurableToolResults = engine === 'durable' || engine === 'evented' ? it.fails : it;
-
-    itFailsOnDurableToolResults('onFinish fires after tool execution', async () => {
+    it('onFinish fires after tool execution', async () => {
       const tickTool = createTool({
         id: 'tick',
         description: 'Advance a counter.',
@@ -88,6 +85,8 @@ describeForAllEngines(
       });
 
       let toolResults: any[] | undefined;
+      let toolCalls: any[] | undefined;
+      let steps: any[] | undefined;
 
       await runLoopScenario({
         engine,
@@ -97,6 +96,8 @@ describeForAllEngines(
         stopWhen: stepCountIs(3),
         onFinish: (result: any) => {
           toolResults = result.toolResults;
+          toolCalls = result.toolCalls;
+          steps = result.steps;
         },
         fixtures: llm => {
           llm.on(
@@ -111,6 +112,11 @@ describeForAllEngines(
       expect(toolResults![0].type).toBe('tool-result');
       expect(toolResults![0].payload.toolName).toBe('tick');
       expect(toolResults![0].payload.result).toEqual({ count: 1 });
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls![0].type).toBe('tool-call');
+      expect(toolCalls![0].payload.toolName).toBe('tick');
+      expect(steps![0].toolResults[0].type).toBe('tool-result');
+      expect(steps![0].toolCalls[0].type).toBe('tool-call');
     });
   },
   {},

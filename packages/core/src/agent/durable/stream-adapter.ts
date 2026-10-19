@@ -94,13 +94,37 @@ export function createRunGenerationFilter({
  * the canonical LanguageModelUsage shape (inputTokens/outputTokens).
  */
 /**
+ * A step's tool calls/results in the chunk shape the main loop hands to callbacks: the buffered chunks when
+ * they cover the serialized records, else the serialized records wrapped as chunks (a resumed approval
+ * executes a call whose tool-call chunk was streamed by the earlier segment, so the resumed buffer lacks it).
+ */
+function stepToolChunks(
+  buffered: unknown,
+  serialized: unknown,
+  type: 'tool-call' | 'tool-result',
+  runId: string,
+): unknown[] | undefined {
+  const useBuffered =
+    Array.isArray(buffered) && (!Array.isArray(serialized) || buffered.length >= serialized.length);
+  const entries = useBuffered ? buffered : serialized;
+  if (!Array.isArray(entries)) return undefined;
+  return entries.map(entry =>
+    entry && typeof entry === 'object' && 'type' in entry && entry.type === type
+      ? entry
+      : { type, runId, from: 'AGENT', payload: entry },
+  );
+}
+
+/**
  * The run's serialized steps are the authoritative step list (a resumed segment's output only buffered
- * its own suffix), but only the buffered steps carry each step's `response` and `content` (#26780).
- * Overlay those onto the run steps, aligned from the last finished step.
+ * its own suffix), but only the buffered steps carry each step's `response` and `content` (#26780) and
+ * chunk-shaped `toolCalls`/`toolResults` (#27428). Overlay those onto the run steps, aligned from the last
+ * finished step; tool records the buffer lacks are wrapped as chunks.
  */
 async function withBufferedStepResponses(
   runSteps: unknown[] | undefined,
   output: { steps: Promise<unknown[]> },
+  runId: string,
 ): Promise<unknown[]> {
   const buffered = ((await output.steps.catch(() => undefined)) ?? []) as Record<string, unknown>[];
   if (!runSteps?.length) return buffered;
@@ -110,12 +134,16 @@ async function withBufferedStepResponses(
     buffered.at(-1)?.finishReason !== 'abort';
   const offset = runSteps.length - (trailingAborted ? 1 : 0) - buffered.length;
   return runSteps.map((step, i) => {
+    const record = step as Record<string, unknown>;
     const match = i >= offset ? buffered[i - offset] : undefined;
-    if (!match) return step;
+    const toolCalls = stepToolChunks(match?.toolCalls, record.toolCalls, 'tool-call', runId);
+    const toolResults = stepToolChunks(match?.toolResults, record.toolResults, 'tool-result', runId);
     return {
-      ...(step as Record<string, unknown>),
-      ...(match.response !== undefined ? { response: match.response } : {}),
-      ...(match.content !== undefined ? { content: match.content } : {}),
+      ...record,
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+      ...(toolResults !== undefined ? { toolResults } : {}),
+      ...(match?.response !== undefined ? { response: match.response } : {}),
+      ...(match?.content !== undefined ? { content: match.content } : {}),
     };
   });
 }
@@ -593,7 +621,7 @@ export function createDurableAgentStream<OUTPUT = undefined>(
           // consume the stream (for example, resume() with a delay-only wait).
           if (finishReason === 'abort') {
             try {
-              const steps = onAbort ? await withBufferedStepResponses(data.output?.steps, output) : [];
+              const steps = onAbort ? await withBufferedStepResponses(data.output?.steps, output, runId) : [];
               await onAbort?.({
                 steps,
                 text: (data.output?.text ?? '') as string,
@@ -620,7 +648,7 @@ export function createDurableAgentStream<OUTPUT = undefined>(
             }
           } else if (onFinish) {
             try {
-              const steps = (await withBufferedStepResponses(data.output?.steps, output)) as any[];
+              const steps = (await withBufferedStepResponses(data.output?.steps, output, runId)) as any[];
               const allToolResults = steps.flatMap((s: any) => s?.toolResults ?? []);
               const allToolCalls = steps.flatMap((s: any) => s?.toolCalls ?? []);
               // The structured object is parsed while the output drains the (now closed) chunk
