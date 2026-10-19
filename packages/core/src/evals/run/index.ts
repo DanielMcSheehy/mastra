@@ -1635,8 +1635,15 @@ async function saveSingleScore({
   turn?: { index: number; traceId?: string; spanId?: string; threadId?: string };
 }): Promise<void> {
   try {
-    // Get scorer information
-    let scorer = mastra?.getScorerById?.(scorerId);
+    // Get scorer information. `getScorerById` throws for scorers that are not
+    // registered on the Mastra instance (e.g. passed only via `runEvals({ scorers })`),
+    // so treat a miss as "not found" and fall through to the fallbacks below.
+    let scorer;
+    try {
+      scorer = mastra?.getScorerById?.(scorerId);
+    } catch {
+      scorer = undefined;
+    }
 
     if (!scorer) {
       // Try to get from target's scorers

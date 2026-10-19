@@ -172,4 +172,60 @@ describe('runEvals - Score Persistence', () => {
     expect(saveScoreCalls[0].requestContext).toEqual({ userId: 'u1', 'nested.a.b': 'x' });
     expect(JSON.stringify(saveScoreCalls[0])).not.toContain('super-secret-token');
   });
+
+  it('saves scores for scorers passed only to runEvals (not registered on Mastra)', async () => {
+    const dummyModel = new MockLanguageModelV2({
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: 'Test response' }],
+        finishReason: 'stop',
+        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+        rawCall: { rawPrompt: null, rawSettings: {} },
+        warnings: [],
+      }),
+      doStream: async () => ({
+        rawCall: { rawPrompt: null, rawSettings: {} },
+        warnings: [],
+        stream: convertArrayToReadableStream([
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-start', id: 'text-1' },
+          { type: 'text-delta', id: 'text-1', delta: 'Test' },
+          { type: 'text-end', id: 'text-1' },
+          { type: 'finish', finishReason: 'stop', usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 } },
+        ]),
+      }),
+    });
+
+    const agent = new Agent({
+      id: 'inlineScorerAgent',
+      name: 'Inline Scorer Agent',
+      instructions: 'Test instructions',
+      model: dummyModel,
+    });
+
+    const scorer = createScorer({
+      id: 'inlineOnlyScorer',
+      description: 'Scorer passed only via runEvals',
+      name: 'inlineOnlyScorer',
+    }).generateScore(() => 0.5);
+
+    const storage = new InMemoryStore();
+    // Note: the scorer is intentionally NOT registered on the Mastra instance.
+    const mastra = new Mastra({ agents: { inlineScorerAgent: agent }, logger: false, storage });
+
+    const result = await runEvals({
+      data: [{ input: 'Test input' }],
+      scorers: [scorer],
+      target: mastra.getAgentById('inlineScorerAgent'),
+    });
+
+    expect(result.scores.inlineOnlyScorer).toBe(0.5);
+
+    const scoresStore = (await storage.getStore('scores'))!;
+    const { scores } = await scoresStore.listScoresByScorerId({
+      scorerId: 'inlineOnlyScorer',
+      pagination: { page: 0, perPage: 10 },
+    });
+    expect(scores).toHaveLength(1);
+    expect(scores[0]).toMatchObject({ scorerId: 'inlineOnlyScorer', score: 0.5, entityId: 'inlineScorerAgent' });
+  });
 });
