@@ -925,6 +925,8 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
           maxRetries: entry.maxRetries ?? 0,
           enabled: entry.enabled ?? true,
           headers: entry.headers,
+          modelSettings: entry.modelSettings,
+          providerOptions: entry.providerOptions,
         }))
       : undefined,
     workspace,

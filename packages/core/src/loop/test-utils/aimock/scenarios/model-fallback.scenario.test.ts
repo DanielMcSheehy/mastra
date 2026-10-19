@@ -6,7 +6,6 @@ import {
   runLoopScenario,
   useLoopScenarioAimock,
   describeForAllEngines,
-  isDurableEngineVariant,
 } from '../aimock-scenario';
 
 /**
@@ -190,10 +189,7 @@ describeForAllEngines('AIMock loop scenario: model fallback list', engine => {
   // Completions body is journaled verbatim, so sampling settings are visible there.
   // Real OpenAI model ids: Mastra strips temperature/topP for ids its capability
   // registry does not list as temperature-capable (stream/aisdk/v5/execute.ts).
-  // Durable engines drop per-entry modelSettings/providerOptions when serializing
-  // the model list (durable/preparation.ts), so no sampling params are sent: #27550.
-  const itFailsOnDurable = isDurableEngineVariant(engine) ? it.fails : it;
-  itFailsOnDurable(
+  it(
     'sends each entry its own temperature after failover without leaking the primary settings',
     async () => {
       const { output, requests } = await runLoopScenario({

@@ -682,10 +682,23 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
             let currentTools = tools as unknown as ToolSet;
             let currentToolChoice = execOptions.toolChoice as ToolChoice<ToolSet> | undefined;
             let currentActiveTools = execOptions.activeTools;
-            let currentModelSettings: Record<string, unknown> = { ...(execOptions.modelSettings ?? {}) };
+            // Per-entry modelSettings/providerOptions from a fallback list shallow-merge
+            // on top of call-time options, mirroring the in-process agentic loop.
+            const registryModelEntry = hasModelList ? resolvedModelList?.find(m => m.id === modelEntry.id) : undefined;
+            const entryModelSettings = registryModelEntry?.modelSettings;
+            let currentModelSettings: Record<string, unknown> = {
+              ...(execOptions.modelSettings ?? {}),
+              ...(entryModelSettings ?? {}),
+            };
+            if (execOptions.modelSettings?.timeout || entryModelSettings?.timeout) {
+              currentModelSettings.timeout = {
+                ...(execOptions.modelSettings?.timeout as Record<string, unknown> | undefined),
+                ...entryModelSettings?.timeout,
+              };
+            }
             let currentProviderOptions: SharedProviderOptions | undefined = mergeProviderOptions(
               execOptions.providerOptions,
-              modelEntry.config.providerOptions,
+              registryModelEntry?.providerOptions ?? modelEntry.config.providerOptions,
             ) as SharedProviderOptions | undefined;
 
             // 6. Rebuild MODEL_GENERATION span from passed data

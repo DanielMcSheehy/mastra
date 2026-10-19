@@ -44,7 +44,7 @@ import type { MessageList } from '../message-list';
 import type { SerializedMessageListState } from '../message-list/state';
 import type { SaveQueueManager } from '../save-queue';
 import type { CreatedAgentSignal } from '../signals';
-import type { GoalConfig, StructuredOutputOptions } from '../types';
+import type { AgentModelManagerConfig, GoalConfig, StructuredOutputOptions } from '../types';
 import type { ExecutionFence } from './execution-fence';
 
 /**
@@ -729,6 +729,10 @@ export interface RegistryModelListEntry {
   enabled: boolean;
   /** Model-config-level headers (from `AgentModelManagerConfig.headers`). */
   headers?: Record<string, string>;
+  /** Per-entry model settings (from `AgentModelManagerConfig.modelSettings`). */
+  modelSettings?: AgentModelManagerConfig['modelSettings'];
+  /** Per-entry provider options (from `AgentModelManagerConfig.providerOptions`). */
+  providerOptions?: AgentModelManagerConfig['providerOptions'];
 }
 
 /**

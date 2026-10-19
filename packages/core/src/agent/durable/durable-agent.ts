@@ -251,6 +251,8 @@ function rebindRecoveredModelList(
         maxRetries: live.maxRetries ?? 0,
         enabled: true,
         headers: live.headers,
+        modelSettings: live.modelSettings,
+        providerOptions: live.providerOptions,
       });
     }
   });
