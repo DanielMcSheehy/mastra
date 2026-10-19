@@ -98,3 +98,45 @@ test('counts truncation on the prefixed e5 inputs', async () => {
 
   expect(mocks.countTruncated).toHaveBeenCalledWith(['passage: hello']);
 });
+
+const modelNames = [
+  'small',
+  'base',
+  'multilingualE5LargeQuery',
+  'multilingualE5LargePassage',
+  'smallV2',
+  'baseV2',
+  'smallLegacy',
+  'baseLegacy',
+] as const;
+
+test.each(modelNames.flatMap(name => [1, 3].map(received => ({ name, received }))))(
+  '$name rejects $received embeddings for 2 inputs',
+  async ({ name, received }) => {
+    mocks.embed.mockImplementationOnce(() =>
+      (async function* () {
+        yield Array.from({ length: received }, () => [0.1, 0.2, 0.3]);
+      })(),
+    );
+    const { fastembed } = await import('./index.js');
+
+    await expect(fastembed[name].doEmbed({ values: ['first', 'second'] })).rejects.toThrow(
+      `Expected 2 embeddings but received ${received}`,
+    );
+    expect(mocks.countTruncated).not.toHaveBeenCalled();
+  },
+);
+
+test('preserves embedding order across generator batches', async () => {
+  mocks.embed.mockImplementationOnce(() =>
+    (async function* () {
+      yield [new Float32Array([1]), new Float32Array([2])];
+      yield [new Float32Array([3])];
+    })(),
+  );
+  const { fastembed } = await import('./index.js');
+
+  const result = await fastembed.small.doEmbed({ values: ['a', 'b', 'c'] });
+
+  expect(result.embeddings).toEqual([[1], [2], [3]]);
+});
