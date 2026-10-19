@@ -521,6 +521,8 @@ export type InternalMastraMCPClientOptions = {
   clientInfo?: MCPClientInfo;
   /** Optional timeout in milliseconds */
   timeout?: number;
+  /** Whether to install process exit and signal handlers that disconnect on shutdown. Defaults to `true`. */
+  registerProcessHooks?: boolean;
 };
 
 /**

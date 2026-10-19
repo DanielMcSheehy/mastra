@@ -430,6 +430,7 @@ export class InternalMastraMCPClient extends MastraBase {
   private exitHookUnsubscribe?: () => void;
   private sigTermHandler?: () => void;
   private sigHupHandler?: () => void;
+  private readonly shouldRegisterProcessHooks: boolean;
   private serverInstructions?: string;
   private serverImplementation?: MCPServerImplementation;
   /** The verdict of the last successful probe, reused so reconnects skip it. */
@@ -455,12 +456,14 @@ export class InternalMastraMCPClient extends MastraBase {
     clientInfo,
     server,
     timeout = DEFAULT_REQUEST_TIMEOUT_MSEC,
+    registerProcessHooks = true,
   }: InternalMastraMCPClientOptions) {
     super({ name: 'MastraMCPClient' });
     // Started early so the sync toolFromDefinition() normally has the input schema check ready.
     void loadInputSchemaMetaValidator();
     this.name = name;
     this.timeout = timeout;
+    this.shouldRegisterProcessHooks = registerProcessHooks;
     this.logHandler = server.logger;
     this.serverLogLevel =
       (server.enableServerLogs ?? true) ? (server.serverLogLevel ?? DEFAULT_SERVER_LOG_LEVEL) : undefined;
@@ -869,8 +872,11 @@ export class InternalMastraMCPClient extends MastraBase {
 
     // Registered before the connection settles so an exit during a connect attempt still
     // tears down anything the transport already started (a spawned stdio child, say).
-    // The failure path inside the promise removes them again.
-    this.registerProcessHooks();
+    // The failure path inside the promise removes them again. A host that owns its own
+    // shutdown opts out and calls disconnect() itself.
+    if (this.shouldRegisterProcessHooks) {
+      this.registerProcessHooks();
+    }
 
     return this.isConnected;
   }

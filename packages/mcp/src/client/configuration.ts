@@ -70,6 +70,14 @@ export interface MCPClientOptions {
    * Per-server `clientInfo` overrides it field-wise. Defaults to the server key and `'1.0.0'`.
    */
   clientInfo?: MCPClientInfo;
+  /**
+   * Whether each server connection installs process exit and signal handlers (`SIGINT`,
+   * `SIGTERM`, `SIGHUP`) that disconnect it and then end the process. Defaults to `true`.
+   * Set to `false` when the host application runs its own shutdown on those signals, and
+   * call {@link MCPClient.disconnect} from it; otherwise the hooks end the process before
+   * the host's handler finishes.
+   */
+  registerProcessHooks?: boolean;
 }
 
 /**
@@ -103,6 +111,7 @@ export class MCPClient extends MastraBase {
   private id: string;
   private defaultTimeout: number;
   private defaultClientInfo?: MCPClientInfo;
+  private readonly registerProcessHooks: boolean;
   private mcpClientsById = new Map<string, InternalMastraMCPClient>();
   private disconnectPromise: Promise<void> | null = null;
   private authFlowsByServer = new Map<string, Promise<void>>();
@@ -147,6 +156,7 @@ export class MCPClient extends MastraBase {
     super({ name: 'MCPClient' });
     this.defaultTimeout = args.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC;
     this.defaultClientInfo = args.clientInfo && { ...args.clientInfo };
+    this.registerProcessHooks = args.registerProcessHooks ?? true;
     this.serverConfigs = args.servers;
     this.id = args.id ?? this.makeId();
 
@@ -652,7 +662,8 @@ To fix this you have three different options:
    *
    * @example
    * ```typescript
-   * // Cleanup on application shutdown
+   * // Cleanup on application shutdown, with `registerProcessHooks: false` so the client's
+   * // own signal handlers don't end the process before this handler finishes
    * process.on('SIGTERM', async () => {
    *   await mcp.disconnect();
    *   process.exit(0);
@@ -1504,6 +1515,7 @@ To fix this you have three different options:
         name: config.clientInfo?.name ?? this.defaultClientInfo?.name,
         version: config.clientInfo?.version ?? this.defaultClientInfo?.version,
       },
+      registerProcessHooks: this.registerProcessHooks,
     });
 
     mcpClient.__setLogger(this.logger);
