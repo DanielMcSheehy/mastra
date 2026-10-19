@@ -1052,6 +1052,19 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
               }
             }
 
+            // generateTitle.emitEvent: hold FINISH until the title is persisted, then stream it
+            // as a transient chunk, matching Agent#executeOnFinish on the in-process loop.
+            if (pubsub && finishResult.streamedTitle) {
+              const title = await finishResult.streamedTitle;
+              if (title && initData.state?.threadId) {
+                await emitChunkEvent(pubsub, state.runId, {
+                  type: 'data-thread-title',
+                  data: { threadId: initData.state.threadId, title },
+                  transient: true,
+                });
+              }
+            }
+
             const finalOutput = {
               messageListState: finishResult.messageListState,
               messageId: state.messageId,

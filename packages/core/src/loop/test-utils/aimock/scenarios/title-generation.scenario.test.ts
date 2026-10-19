@@ -395,11 +395,7 @@ describeForAllEngines('AIMock loop scenario: thread title generation', engine =>
     expect(thread?.metadata).toMatchObject({ keep: 'me' });
   });
 
-  // The durable finish step (finalize-run.ts generateDurableThreadTitle) saves the title but never
-  // writes the data-thread-title chunk, so durable/evented runs can't stream it. Deterministic; tracked in #27551.
-  const itFailsOnDurable = engine === 'durable' || engine === 'evented' ? it.fails : it;
-
-  itFailsOnDurable('generateTitle.emitEvent streams the title as a transient chunk before finish', async () => {
+  it('generateTitle.emitEvent streams the title as a transient chunk before finish', async () => {
     const llm = getMock();
     const memory = new MockMemory({
       options: { generateTitle: { instructions: TITLE_INSTRUCTIONS, emitEvent: true } },

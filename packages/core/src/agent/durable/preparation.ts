@@ -964,6 +964,7 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
     // when the merged config has no `generateTitle` or the thread already has a
     // title. Non-serializable — cross-process engines skip title generation.
     generateThreadTitle: memory ? async args => generateDurableThreadTitle({ agent, memory, ...args }) : undefined,
+    onTitleGenerated: execOptions?.memory?.onTitleGenerated,
     // Signal messages already in the messageList at run start (from persisted
     // history). Echoed as data-signal parts on the first LLM step so the client
     // sees them without refetching. Spliced once, never re-emitted.

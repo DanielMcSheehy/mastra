@@ -908,8 +908,9 @@ export interface RunRegistryEntry {
    * Parked here during preparation, where the agent instance is in scope; the
    * durable finish step invokes it after the run completes. When the merged
    * memory config has no `generateTitle`, or the thread already has a title, it
-   * is a no-op. Non-serializable (a closure) — cross-process engines lose it and
-   * skip title generation, matching the other registry closures.
+   * is a no-op. Resolves to the persisted title, if any. Non-serializable (a
+   * closure) — cross-process engines lose it and skip title generation, matching
+   * the other registry closures.
    */
   generateThreadTitle?: (args: {
     threadId: string;
@@ -918,7 +919,12 @@ export interface RunRegistryEntry {
     messageListState: SerializedMessageListState;
     requestContext?: RequestContext;
     tracingContext?: TracingContext;
-  }) => Promise<void>;
+  }) => Promise<string | undefined>;
+  /**
+   * Per-call `memory.onTitleGenerated` callback, run by the durable finish step after a
+   * generated title is persisted. Non-serializable — cross-process engines skip it.
+   */
+  onTitleGenerated?: (title: string) => void | Promise<void>;
   /**
    * Signal messages already present in the `messageList` at run start (from
    * persisted history). These are echoed as `data-signal` stream data parts
