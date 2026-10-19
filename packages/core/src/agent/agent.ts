@@ -312,6 +312,9 @@ const RESUME_SUSPEND_DURABILITY_TIMEOUT_MS = 30_000;
 /** Upper bound for the exponential poll backoff inside that wait. */
 const RESUME_SUSPEND_DURABILITY_MAX_POLL_INTERVAL_MS = 500;
 
+/** RequestContext key persisting a run's `returnScorerData` opt-in across suspend/resume. */
+const RETURN_SCORER_DATA_KEY = '__mastra_returnScorerData';
+
 /**
  * Agentic-loop runs currently being resumed in this process, for stores that
  * cannot claim a run atomically. Keyed by runId.
@@ -7719,6 +7722,20 @@ export class Agent<
     return existingSnapshot;
   }
 
+  /**
+   * Resolves `returnScorerData` for a resumed run: an explicit caller value wins, then the
+   * original run's opt-in persisted in the snapshot, then the agent's default options.
+   */
+  #resolveResumeReturnScorerData(
+    callerValue: boolean | undefined,
+    existingSnapshot: WorkflowRunState | null | undefined,
+    defaultValue: boolean | undefined,
+  ): boolean | undefined {
+    if (callerValue !== undefined) return callerValue;
+    if (existingSnapshot?.requestContext?.[RETURN_SCORER_DATA_KEY] === true) return true;
+    return defaultValue;
+  }
+
   #getSnapshotMemoryInfo(existingSnapshot: WorkflowRunState | null | undefined): AgentSnapshotMemoryInfo | undefined {
     // Canonical extraction shared with storage adapters — see
     // `getSnapshotMemoryInfo` in storage/domains/workflows/snapshot-memory-info.ts.
@@ -8740,6 +8757,15 @@ export class Agent<
       normalizeToolPayloadTransformPolicy(
         this.#mastra?.getToolPayloadTransform?.() ?? (this.#mastra as any)?.getToolPayloadProjection?.(),
       );
+
+    // Persist the run-level returnScorerData opt-in in the run's RequestContext so it
+    // lands in the suspend snapshot and resumeGenerate()/resumeStream() can restore it
+    // without the caller re-passing it — matching durable agents (#27580).
+    if (options.returnScorerData) {
+      requestContext.set(RETURN_SCORER_DATA_KEY, true);
+    } else {
+      requestContext.delete(RETURN_SCORER_DATA_KEY);
+    }
 
     // Create the workflow with all necessary context
     const executionWorkflow = createPrepareStreamWorkflow<OUTPUT>({
@@ -10571,6 +10597,11 @@ export class Agent<
       method: 'resumeStream',
     });
     const snapshotMemoryInfo = this.#getSnapshotMemoryInfo(existingSnapshot);
+    loopStreamOptions.returnScorerData = this.#resolveResumeReturnScorerData(
+      streamOptions?.returnScorerData,
+      existingSnapshot,
+      defaultOptions?.returnScorerData,
+    );
 
     if (snapshotMemoryInfo?.threadId) {
       mergedStreamOptions.memory = {
@@ -10787,6 +10818,11 @@ export class Agent<
 
     const runId = options?.runId ?? '';
     const existingSnapshot = await this.#loadAgenticLoopSnapshotOrThrow({ runId, method: 'resumeGenerate' });
+    loopOptions.returnScorerData = this.#resolveResumeReturnScorerData(
+      options?.returnScorerData,
+      existingSnapshot,
+      defaultOptions?.returnScorerData,
+    );
     const { options: scopedOptions, resolved: resolvedScopes } = await this.#resolveRunScopes(mergedOptions, {
       callScopes: options?.scopes,
       defaultScopes: defaultOptions?.scopes,
